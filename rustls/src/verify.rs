@@ -183,7 +183,23 @@ pub trait ServerCertVerifier: Send + Sync {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DnsName(pub(crate) webpki::DnsName);
 
+impl<'a> From<webpki::DnsNameRef<'a>> for DnsName {
+    fn from(dns_name: webpki::DnsNameRef<'a>) -> DnsName {
+        DnsName(dns_name.into())
+    }
+}
+
 impl AsRef<str> for DnsName {
+    fn as_ref(&self) -> &str {
+        AsRef::<str>::as_ref(&self.0)
+    }
+}
+
+/// A type which encapsuates a string that is a valid IP address.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IpAddress(pub(crate) webpki::IpAddress);
+
+impl AsRef<str> for IpAddress {
     fn as_ref(&self) -> &str {
         AsRef::<str>::as_ref(&self.0)
     }
@@ -289,7 +305,7 @@ impl ServerCertVerifier for WebPkiVerifier {
     /// Will verify the certificate is valid in the following ways:
     /// - Signed by a  trusted `RootCertStore` CA
     /// - Not Expired
-    /// - Valid for DNS entry
+    /// - Valid for DNS entry or IP address
     fn verify_server_cert(
         &self,
         end_entity: &Certificate,
@@ -302,12 +318,10 @@ impl ServerCertVerifier for WebPkiVerifier {
         let (cert, chain, trustroots) = prepare(end_entity, intermediates, &self.roots)?;
         let webpki_now = webpki::Time::try_from(now).map_err(|_| Error::FailedToGetCurrentTime)?;
 
-        let ServerName::DnsName(dns_name) = server_name;
-
         let cert = cert
             .verify_is_valid_tls_server_cert(
                 SUPPORTED_SIG_ALGS,
-                &webpki::TlsServerTrustAnchors(&trustroots),
+                &webpki::TLSServerTrustAnchors(&trustroots),
                 &chain,
                 webpki_now,
             )
@@ -322,7 +336,7 @@ impl ServerCertVerifier for WebPkiVerifier {
             trace!("Unvalidated OCSP response: {:?}", ocsp_response.to_vec());
         }
 
-        cert.verify_is_valid_for_dns_name(dns_name.0.as_ref())
+        cert.verify_is_valid_for_dns_name_or_ip(Into::<webpki::DnsNameOrIpRef>::into(server_name))
             .map_err(pki_error)
             .map(|_| ServerCertVerified::assertion())
     }
@@ -503,7 +517,7 @@ impl ClientCertVerifier for AllowAnyAuthenticatedClient {
         let now = webpki::Time::try_from(now).map_err(|_| Error::FailedToGetCurrentTime)?;
         cert.verify_is_valid_tls_client_cert(
             SUPPORTED_SIG_ALGS,
-            &webpki::TlsClientTrustAnchors(&trustroots),
+            &webpki::TLSClientTrustAnchors(&trustroots),
             &chain,
             now,
         )
@@ -560,7 +574,7 @@ impl ClientCertVerifier for AllowAnyAnonymousOrAuthenticatedClient {
 fn pki_error(error: webpki::Error) -> Error {
     use webpki::Error::*;
     match error {
-        BadDer | BadDerTime => Error::InvalidCertificateEncoding,
+        BadDER | BadDERTime => Error::InvalidCertificateEncoding,
         InvalidSignatureForPublicKey => Error::InvalidCertificateSignature,
         UnsupportedSignatureAlgorithm | UnsupportedSignatureAlgorithmForPublicKey => {
             Error::InvalidCertificateSignatureType

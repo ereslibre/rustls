@@ -1,3 +1,5 @@
+use webpki::DnsName;
+
 use crate::builder::{ConfigBuilder, WantsCipherSuites};
 use crate::conn::{CommonState, ConnectionCommon, Protocol, Side};
 use crate::error::Error;
@@ -20,10 +22,11 @@ use super::hs;
 #[cfg(feature = "quic")]
 use crate::quic;
 
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::error::Error as StdError;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
+use std::os::unix::prelude::OsStrExt;
 use std::sync::Arc;
 use std::{fmt, io, mem};
 
@@ -215,6 +218,14 @@ pub enum ServerName {
     /// is sent in the TLS Server Name Indication (SNI)
     /// extension.
     DnsName(verify::DnsName),
+    /// The server is identified by an IP address.
+    IpAddress(verify::IpAddress),
+}
+
+impl<'a> From<&'a verify::IpAddress> for webpki::IpAddressRef<'a> {
+    fn from(ip_address: &'a verify::IpAddress) -> webpki::IpAddressRef<'a> {
+        (&ip_address.0).into()
+    }
 }
 
 impl ServerName {
@@ -224,6 +235,7 @@ impl ServerName {
     pub(crate) fn for_sni(&self) -> Option<webpki::DnsNameRef> {
         match self {
             Self::DnsName(dns_name) => Some(dns_name.0.as_ref()),
+            Self::IpAddress(_) => None,
         }
     }
 
@@ -233,12 +245,12 @@ impl ServerName {
             DnsName = 0x01,
         }
 
-        let Self::DnsName(dns_name) = self;
-        let bytes = dns_name.0.as_ref();
+        let dns_name_or_ip: webpki::DnsNameOrIpRef = self.into();
+        let bytes = dns_name_or_ip.as_ref();
 
-        let mut r = Vec::with_capacity(2 + bytes.as_ref().len());
+        let mut r = Vec::with_capacity(2 + bytes.len());
         r.push(UniqueTypeCode::DnsName as u8);
-        r.push(bytes.as_ref().len() as u8);
+        r.push(bytes.len() as u8);
         r.extend_from_slice(bytes.as_ref());
 
         r
@@ -253,6 +265,17 @@ impl TryFrom<&str> for ServerName {
         match webpki::DnsNameRef::try_from_ascii_str(s) {
             Ok(dns) => Ok(Self::DnsName(verify::DnsName(dns.into()))),
             Err(webpki::InvalidDnsNameError) => Err(InvalidDnsNameError),
+        }
+    }
+}
+
+impl<'a> From<&'a ServerName> for webpki::DnsNameOrIpRef<'a> {
+    fn from(server_name: &'a ServerName) -> webpki::DnsNameOrIpRef<'a> {
+        match server_name {
+            ServerName::DnsName(dns_name) => webpki::DnsNameOrIpRef::DnsName(dns_name.0.as_ref()),
+            ServerName::IpAddress(ip_address) => {
+                webpki::DnsNameOrIpRef::IpAddress(ip_address.into())
+            }
         }
     }
 }
