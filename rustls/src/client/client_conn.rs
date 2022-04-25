@@ -20,7 +20,7 @@ use super::hs;
 #[cfg(feature = "quic")]
 use crate::quic;
 
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::error::Error as StdError;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
@@ -259,9 +259,14 @@ impl ServerName {
 impl TryFrom<&str> for ServerName {
     type Error = InvalidDnsNameError;
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        match webpki::DnsNameRef::try_from_ascii_str(s) {
-            Ok(dns) => Ok(Self::DnsName(verify::DnsName(dns.into()))),
-            Err(webpki::InvalidDnsNameError) => Err(InvalidDnsNameError),
+        match webpki::DnsNameOrIpRef::try_from_ascii_str(s) {
+            Ok(dns_name_or_ip) =>
+                match dns_name_or_ip {
+                    webpki::DnsNameOrIpRef::DnsName(dns_name) => Ok(Self::DnsName(verify::DnsName(dns_name.into()))),
+                    webpki::DnsNameOrIpRef::IpAddress(ip_address) => Ok(Self::IpAddress(verify::IpAddress(ip_address.try_into().expect("invalid IP address")))),
+                    _ => Err(InvalidDnsNameError),
+                },
+            Err(webpki::InvalidDnsNameOrIpError) => Err(InvalidDnsNameError),
         }
     }
 }
