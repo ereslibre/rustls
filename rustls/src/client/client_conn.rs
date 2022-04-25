@@ -1,5 +1,3 @@
-use webpki::DnsName;
-
 use crate::builder::{ConfigBuilder, WantsCipherSuites};
 use crate::conn::{CommonState, ConnectionCommon, Protocol, Side};
 use crate::error::Error;
@@ -22,11 +20,10 @@ use super::hs;
 #[cfg(feature = "quic")]
 use crate::quic;
 
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::error::Error as StdError;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
-use std::os::unix::prelude::OsStrExt;
 use std::sync::Arc;
 use std::{fmt, io, mem};
 
